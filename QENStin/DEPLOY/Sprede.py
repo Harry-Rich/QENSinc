@@ -40,11 +40,14 @@ class Sprede:
             ind = kinisi_trajectory.get_indices(structure,
                                                 specie=spec,
                                                 framework_indices=None)[0]
+            
             total_scat_lengths[ind] = b_inco_dict[isotopes[specie.index(spec)]]
 
         total_scat_lengths = [
             x for x in total_scat_lengths if np.isnan(x) == False
         ]
+
+        total_scat_lengths = np.array(total_scat_lengths)
 
         self.total_scat_lengths = total_scat_lengths
         self.kinisi_trajectory = kinisi_trajectory
@@ -81,7 +84,7 @@ class Sprede:
         incoh_f = np.zeros(
             (len(q_points), len(self.kinisi_trajectory.disp_3d)))
 
-        s_len_sq = np.array(self.total_scat_lengths)**2
+        s_len_sq = self.total_scat_lengths**2
 
         for i in tqdm(range(0, len(self.kinisi_trajectory.delta_t))):
 
@@ -102,6 +105,13 @@ class Sprede:
     def delta_t(self):
         dt = self.kinisi_trajectory.delta_t
         return dt
+    
+
+    @property
+    def scattering_lengths(self):
+        scattering_lengths = self.total_scat_lengths
+        return scattering_lengths
+
 
 
 class MDAnalysisParser(Sprede):
@@ -198,6 +208,7 @@ class PymatgenParser(Sprede):
 
     :param structures: Structures ordered in sequence of run.
     :param specie: Specie to calculate diffusivity for as a String, e.g. :py:attr:`'Li'`.
+    :param isotopes: List of isotopes formatted based on the Neutron scattering lengths and cross sections from NIST https://www.ncnr.nist.gov/resources/n-lengths/list.html
     :param time_step: Time step, in picoseconds, between steps in trajectory.
     :param step_skip: Sampling freqency of the trajectory (time_step is multiplied by this number to get the real
         time between output from the simulation file).
