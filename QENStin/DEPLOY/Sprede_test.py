@@ -19,6 +19,8 @@ def incoh(test_sp):
     test_incoh = test_sp.calculate_Finc_qt(q_points)
     return test_incoh
 
+#@pytest.mark.parametrize('example',[10])
+
 
 def test_dt_assignement(test_sp):
     dt_correct = np.arange(1,200,2)
