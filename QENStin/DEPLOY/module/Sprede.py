@@ -4,6 +4,8 @@ from typing import List, Tuple, Union
 import numpy as np
 import pickle
 from tqdm import tqdm
+import scipp as sc
+from scipp.typing import VariableLikeType
 
 
 class Sprede:
@@ -25,8 +27,8 @@ class Sprede:
                  structure: np.ndarray,
                  specie: str,
                  isotopes: List[str],
-                 time_step: float,
-                 step_skip: int,
+                 time_step: VariableLikeType,
+                 step_skip: VariableLikeType,
                  dimensions: np.ndarray,
                  progress: bool = True):
 
@@ -38,10 +40,9 @@ class Sprede:
 
         for spec in specie:
             ind = kinisi_trajectory.get_indices(structure,
-                                                specie=spec,
-                                                framework_indices=None)[0]
-            
-            total_scat_lengths[ind] = b_inco_dict[isotopes[specie.index(spec)]]
+                                                specie=spec,)[0]
+
+            total_scat_lengths[ind.values] = b_inco_dict[isotopes[specie.index(spec)]]
 
         total_scat_lengths = [
             x for x in total_scat_lengths if np.isnan(x) == False
@@ -71,7 +72,7 @@ class Sprede:
 
         return q_points
 
-    def calculate_Finc_qt(self, q_points: np.ndarray):
+    def calculate_Finc_qt(self, q_points: np.ndarray, normalise=True):
         """
         Calculate the incoherent intermediete scattering function F(q,t) as per eqn17 in https://doi.org/10.1016/0010-4655(95)00048-K
 
@@ -82,28 +83,32 @@ class Sprede:
         """
 
         incoh_f = np.zeros(
-            (len(q_points), len(self.kinisi_trajectory.disp_3d)))
+            (len(q_points), len(self.kinisi_trajectory.displacements.values)))
 
         s_len_sq = self.total_scat_lengths**2
+        for i in tqdm(range(1, len(self.kinisi_trajectory.dt)+1)):
 
-        for i in tqdm(range(0, len(self.kinisi_trajectory.delta_t))):
-
+            disp = sc.concat([self.kinisi_trajectory.displacements['obs', i - 1], 
+                              self.kinisi_trajectory.displacements['obs', i:] - self.kinisi_trajectory.displacements['obs', :-i]],
+                              'obs')
+            
             # Probably try and make these variable names have some physical significance
             traj_q_combo = np.einsum('ijk,lk->ijl',
-                                     self.kinisi_trajectory.disp_3d[i],
+                                     disp.values,
                                      q_points)
-
+            
             expensive_exponent = np.exp(1j * traj_q_combo)
-
-            mean_1 = np.mean(expensive_exponent, axis=1)
-
-            incoh_f[:, i] = np.mean(mean_1 * s_len_sq[:, np.newaxis], axis=0)
+            mean_1 = np.mean(expensive_exponent, axis=0)
+            incoh_f[:, i-1] = np.mean(mean_1 * s_len_sq[:, np.newaxis], axis=0)
+        
+        if normalise == True: 
+            incoh_f =  incoh_f / incoh_f[0,0]
 
         return incoh_f
 
     @property
     def delta_t(self):
-        dt = self.kinisi_trajectory.delta_t
+        dt = self.kinisi_trajectory.dt
         return dt
     
 
@@ -154,43 +159,29 @@ class MDAnalysisParser(Sprede):
     """
 
     def __init__(self,
-                 universe: "MDAnalysis.core.universe.Universe",
+                 universe: 'MDAnalysis.core.universe.Universe',
                  specie: str,
                  isotopes: List[str],
-                 time_step: float,
-                 step_skip: int,
-                 sub_sample_atoms: int = 1,
-                 sub_sample_traj: int = 1,
-                 min_dt: float = None,
-                 max_dt: float = None,
-                 n_steps: int = 100,
-                 spacing: str = 'linear',
-                 sampling: str = 'multi-origin',
-                 memory_limit: float = 8.,
-                 progress: bool = True,
-                 specie_indices: List[int] = None,
-                 masses: List[float] = None,
-                 framework_indices: List[int] = None):
+                 time_step: VariableLikeType,
+                 step_skip: VariableLikeType,
+                 dt: VariableLikeType = None,
+                 dimension: str = 'xyz',
+                 distance_unit: sc.Unit = sc.units.angstrom,
+                 specie_indices: VariableLikeType = None,
+                 masses: VariableLikeType = None,
+                 progress: bool = True):
 
         kinisi_trajectory = parser.MDAnalysisParser(
             universe,
             specie=specie,
             time_step=time_step,
             step_skip=step_skip,
-            sub_sample_traj=sub_sample_traj,
-            n_steps=n_steps,
-            spacing=spacing,
-            sampling=sampling,
-            memory_limit=memory_limit,
-            progress=progress,
             specie_indices=specie_indices,
             masses=masses,
-            framework_indices=framework_indices)
+            progress=progress,)
 
         # Can remove this call if I can access the structure from the kinisi_trajectory object
-        structure, coords, latt, __ = parser.MDAnalysisParser.get_structure_coords_latt(
-            universe, progress)
-        
+        structure, coords, latt = kinisi_trajectory.get_structure_coords_latt(universe = universe)
         dimensions = np.diag(structure.dimensions[0:3])
 
         super().__init__(kinisi_trajectory=kinisi_trajectory,
@@ -198,7 +189,7 @@ class MDAnalysisParser(Sprede):
                          specie=specie,
                          isotopes=isotopes,
                          time_step=time_step,
-                         step_skip=step_skip * sub_sample_traj,
+                         step_skip=step_skip,
                          dimensions = dimensions,
                          progress=progress)
 
