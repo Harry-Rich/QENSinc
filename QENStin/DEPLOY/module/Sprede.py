@@ -47,9 +47,7 @@ class Sprede:
         total_scat_lengths = [
             x for x in total_scat_lengths if np.isnan(x) == False
         ]
-
         total_scat_lengths = np.array(total_scat_lengths)
-
         self.total_scat_lengths = total_scat_lengths
         self.kinisi_trajectory = kinisi_trajectory
         self.dimensions = dimensions
@@ -69,7 +67,6 @@ class Sprede:
         q_points = get_spherical_qpoints(cell=self.dimensions,
                                          q_max=q_max,
                                          max_points=max_points)
-
         return q_points
 
     def calculate_Finc_qt(self, q_points: np.ndarray, normalise=True):
@@ -81,22 +78,22 @@ class Sprede:
         :returns: Numpy array [q_points x time_interval] giving the incoherent intermediate scattering function Finc(q,t)
         
         """
-
         incoh_f = np.zeros(
             (len(q_points), len(self.kinisi_trajectory.displacements.values)))
-
         s_len_sq = self.total_scat_lengths**2
+
+    
         for i in tqdm(range(1, len(self.kinisi_trajectory.dt)+1)):
 
             disp = sc.concat([self.kinisi_trajectory.displacements['obs', i - 1], 
                               self.kinisi_trajectory.displacements['obs', i:] - self.kinisi_trajectory.displacements['obs', :-i]],
                               'obs')
-            
+ 
             # Probably try and make these variable names have some physical significance
             traj_q_combo = np.einsum('ijk,lk->ijl',
                                      disp.values,
                                      q_points)
-            
+       
             expensive_exponent = np.exp(1j * traj_q_combo)
             mean_1 = np.mean(expensive_exponent, axis=0)
             incoh_f[:, i-1] = np.mean(mean_1 * s_len_sq[:, np.newaxis], axis=0)
@@ -230,49 +227,42 @@ class PymatgenParser(Sprede):
     """
 
     def __init__(self,
-                 structures: List["pymatgen.core.structure.Structure"],
-                 specie: Union["pymatgen.core.periodic_table.Element", "pymatgen.core.periodic_table.Specie"],
+                 structures: List['pymatgen.core.structure.Structure'],
+                 specie: Union['pymatgen.core.periodic_table.Element', 'pymatgen.core.periodic_table.Specie'],
                  isotopes: List[str],
-                 time_step: float,
-                 step_skip: int,
-                 sub_sample_traj: int = 1,
-                 min_dt: float = None,
-                 max_dt: float = None,
-                 n_steps: int = 100,
-                 spacing: str = 'linear',
-                 sampling: str = 'multi-origin',
-                 memory_limit: float = 8.,
-                 progress: bool = True,
-                 specie_indices: List[int] = None,
-                 masses: List[float] = None,
-                 framework_indices: List[int] = None):
-        
+                 time_step: VariableLikeType,
+                 step_skip: VariableLikeType,
+                 dt: VariableLikeType = None,
+                 dimension: str = 'xyz',
+                 distance_unit: sc.Unit = sc.units.angstrom,
+                 specie_indices: VariableLikeType = None,
+                 masses: VariableLikeType = None,
+                 progress: bool = True,):
+                
         kinisi_trajectory = parser.PymatgenParser(
             structures = structures,
             specie=specie,
             time_step=time_step,
             step_skip=step_skip,
-            sub_sample_traj=sub_sample_traj,
-            n_steps=n_steps,
-            spacing=spacing,
-            sampling=sampling,
-            memory_limit=memory_limit,
-            progress=progress,
+            dt = dt,
+            distance_unit = distance_unit,
             specie_indices=specie_indices,
             masses=masses,
-            framework_indices=framework_indices)
-
-        # Can remove this call if I can access the structure from the kinisi_trajectory object
-        structure, coords, latt = parser.PymatgenParser.get_structure_coords_latt(
-            structures, progress)
+            progress=progress)
         
-        dimensions = latt[0]
+        
+
+        # This call is because of https://github.com/bjmorgan/kinisi/issues/88 - will remove when issue is fixed
+        structure, coords, latt = kinisi_trajectory.get_structure_coords_latt(structures=structures, progress=progress)
+        kinisi_trajectory.displacements = kinisi_trajectory.calculate_displacements(coords = coords, lattice= latt)
+
+        dimensions = latt.values[0]
 
         super().__init__(kinisi_trajectory=kinisi_trajectory,
                          structure=structure,
                          specie=specie,
                          isotopes=isotopes,
                          time_step=time_step,
-                         step_skip=step_skip * sub_sample_traj,
+                         step_skip=step_skip,
                          dimensions = dimensions,
                          progress=progress)
